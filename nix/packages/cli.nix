@@ -10,11 +10,19 @@
 }:
 
 let
-  # fenix-pinned toolchain so the nix build and the dev shell agree on the
+  # fenix-pinned toolchain so nix builds and the dev shell agree on the
   # exact rustc (1.97.1, edition 2024).
   rustPlatform = pkgs.makeRustPlatform {
     inherit (rustToolchain) rustc;
     inherit (rustToolchain) cargo;
+  };
+  legal = import ./license-hooks.nix {
+    inherit pkgs src;
+    pname = "microsandbox-cli";
+    manifest = "crates/cli/Cargo.toml";
+    target = pkgs.stdenv.hostPlatform.rust.rustcTarget;
+    noDefaultFeatures = true;
+    features = "net ssh";
   };
 
 in
@@ -54,9 +62,8 @@ rustPlatform.buildRustPackage rec {
     ]
   }";
 
-  nativeBuildInputs = with pkgs; [
-    pkg-config
-  ];
+  nativeBuildInputs = [ pkgs.pkg-config ] ++ legal.nativeBuildInputs;
+  inherit (legal) postBuild postInstall;
 
   buildInputs = with pkgs; [
     libcap_ng

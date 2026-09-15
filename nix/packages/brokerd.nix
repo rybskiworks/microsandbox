@@ -2,15 +2,24 @@
 # agentd, brokerd does not need to be a static init binary in this deployment.
 {
   lib,
+  pkgs,
   rustPlatform,
   src,
   cargoLock,
   version,
 }:
-
+let
+  legal = import ./license-hooks.nix {
+    inherit pkgs src;
+    pname = "microsandbox-brokerd";
+    manifest = "crates/brokerd/Cargo.toml";
+    target = pkgs.stdenv.hostPlatform.rust.rustcTarget;
+  };
+in
 rustPlatform.buildRustPackage {
   pname = "microsandbox-brokerd";
   inherit version src cargoLock;
+  inherit (legal) nativeBuildInputs postBuild postInstall;
 
   cargoBuildFlags = [
     "-p"

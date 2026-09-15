@@ -1,9 +1,9 @@
 # agentd — guest init/agent daemon for microsandbox microVMs.
 #
 # Built as a static musl binary from this flake's filtered workspace source.
-# agentd runs INSIDE the guest microVM, not on the host — a static
-# musl binary has no library deps and works with any guest rootfs (alpine/musl
-# or glibc).
+# agentd runs INSIDE the guest microVM, not on the host. A static musl binary
+# has no dynamic-library dependencies, but retains third-party licensing duties.
+# It works with musl or glibc guest root filesystems.
 #
 # Uses pkgsStatic (nixpkgs' static musl build infrastructure) so the musl
 # toolchain is handled automatically. nixpkgs' default rustc is used (not the
@@ -18,7 +18,14 @@
   cargoLock,
   version,
 }:
-
+let
+  legal = import ./license-hooks.nix {
+    inherit pkgs src;
+    pname = "microsandbox-agentd";
+    manifest = "crates/agentd/Cargo.toml";
+    target = pkgs.pkgsStatic.stdenv.hostPlatform.rust.rustcTarget;
+  };
+in
 pkgs.pkgsStatic.rustPlatform.buildRustPackage rec {
   pname = "microsandbox-agentd";
   inherit version;
@@ -26,6 +33,7 @@ pkgs.pkgsStatic.rustPlatform.buildRustPackage rec {
   inherit src;
 
   inherit cargoLock;
+  inherit (legal) nativeBuildInputs postBuild postInstall;
 
   # Only build the agentd crate, not the whole workspace.
   cargoBuildFlags = [
@@ -53,4 +61,6 @@ pkgs.pkgsStatic.rustPlatform.buildRustPackage rec {
     fi
     runHook postInstallCheck
   '';
+
+  meta.license = pkgs.lib.licenses.asl20;
 }
