@@ -1,0 +1,108 @@
+# Temporary repair job. Remove with a normal commit before merging the PR.
+name: Repair compliance input
+on:
+  push:
+    branches: [fix/compliance-input-promotion]
+    paths: [.github/workflows/repair-compliance-input.yml]
+permissions:
+  contents: read
+concurrency:
+  group: repair-compliance-input
+  cancel-in-progress: false
+jobs:
+  repair:
+    if: github.repository == 'rybskiworks/microsandbox'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
+        with:
+          install_url: https://releases.nixos.org/nix/nix-2.34.8/install
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = false
+      - name: Update the reviewed firmware input and regenerate its lock
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('flake.nix')
+          old = 'github:rybskiworks/libkrunfw/d575b13e79368b23246be3d93d7935899dec5a3b'
+          new = 'github:rybskiworks/libkrunfw/2fef06d47cd170cdf508d6d14cbbe655339cb19e'
+          text = p.read_text()
+          if text.count(old) != 1:
+              raise SystemExit('Expected exactly one old firmware pin; inspect before retrying')
+          p.write_text(text.replace(old, new))
+          PY
+          nix flake lock
+      - name: Reject unrelated lockfile changes
+        run: |
+          python3 - <<'PY'
+          import json, subprocess
+          from pathlib import Path
+          before = json.loads(subprocess.check_output(['git', 'show', 'HEAD:flake.lock']))
+          after = json.loads(Path('flake.lock').read_text())
+          assert before['version'] == after['version']
+          assert before['root'] == after['root']
+          assert before['nodes'].keys() == after['nodes'].keys()
+          changed = {k for k in before['nodes'] if before['nodes'][k] != after['nodes'][k]}
+          assert changed == {'libkrunfw'}, changed
+          node = after['nodes']['libkrunfw']
+          assert node['inputs'] == before['nodes']['libkrunfw']['inputs']
+          for field in ('locked', 'original'):
+              assert node[field]['owner'] == 'rybskiworks'
+              assert node[field]['repo'] == 'libkrunfw'
+              assert node[field]['rev'] == '2fef06d47cd170cdf508d6d14cbbe655339cb19e'
+          assert node['locked']['narHash'].startswith('sha256-')
+          PY
+          git diff --check
+          git diff -- flake.nix flake.lock
+      - name: Check licensing helpers
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/licensing -v
+      - name: Retain the generated proposal even if publishing is refused
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: firmware-pin-proposal
+          path: |
+            flake.nix
+            flake.lock
+          retention-days: 7
+      - name: Commit both files atomically to this repair branch only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import base64, json, os, urllib.request
+          from pathlib import Path
+          query = '''mutation($input: CreateCommitOnBranchInput!) {
+            createCommitOnBranch(input: $input) { commit { oid url } }
+          }'''
+          variables = {'input': {
+              'branch': {'repositoryNameWithOwner': 'rybskiworks/microsandbox',
+                         'branchName': 'fix/compliance-input-promotion'},
+              'expectedHeadOid': os.environ['EXPECTED_HEAD'],
+              'message': {'headline': 'fix(nix): pin firmware with source-bundle support',
+                          'body': 'Regenerated with Nix 2.34.8; unrelated inputs are unchanged.\nPackage builds remain a separate merge gate.\n\nAssisted-by: ChatGPT'},
+              'fileChanges': {'additions': [
+                  {'path': name, 'contents': base64.b64encode(Path(name).read_bytes()).decode()}
+                  for name in ('flake.nix', 'flake.lock')
+              ]},
+          }}
+          request = urllib.request.Request(
+              'https://api.github.com/graphql',
+              data=json.dumps({'query': query, 'variables': variables}).encode(),
+              headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                       'Content-Type': 'application/json',
+                       'User-Agent': 'microsandbox-compliance-input-repair'})
+          with urllib.request.urlopen(request, timeout=60) as response:
+              result = json.load(response)
+          if result.get('errors'):
+              raise SystemExit(json.dumps(result['errors']))
+          print(json.dumps(result['data']['createCommitOnBranch']['commit']))
+          PY
