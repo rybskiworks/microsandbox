@@ -89,8 +89,6 @@ class NoticeTests(unittest.TestCase):
             m.verify(self.output)
 
     def test_missing_report(self):
-        (self.output / "cargo-about.json").parent.mkdir(parents=True, exist_ok=True)
-        self.output.rmdir()
         self.build()
         (self.output / "cargo-about.json").unlink()
         with self.assertRaisesRegex(ValueError, "missing"):
