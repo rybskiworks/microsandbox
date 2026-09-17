@@ -18,7 +18,7 @@
     git-hooks.follows = "tooling/git-hooks";
 
     libkrunfw = {
-      url = "github:rybskiworks/libkrunfw/d575b13e79368b23246be3d93d7935899dec5a3b";
+      url = "github:rybskiworks/libkrunfw/2fef06d47cd170cdf508d6d14cbbe655339cb19e";
       inputs.tooling.follows = "tooling";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-parts.follows = "flake-parts";
