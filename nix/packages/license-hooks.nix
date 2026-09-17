@@ -11,7 +11,8 @@
   noDefaultFeatures ? false,
 }:
 let
-  helper = ../../scripts/licensing/cargo_notices.py;
+  # Import the directory, not just the script: reviewed evidence is adjacent.
+  helper = "${../../scripts/licensing}/cargo_notices.py";
 in
 {
   nativeBuildInputs = [
