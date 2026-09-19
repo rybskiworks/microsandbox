@@ -46,7 +46,7 @@ use crate::{
     MicrosandboxResult,
     agent::AgentClient,
     backend::{LocalBackend, sandbox::SandboxIdentity},
-    db::entity::sandbox as sandbox_entity,
+    db::entity::{run as run_entity, sandbox as sandbox_entity},
     error::{Operation, UnsupportedReason},
     runtime::SpawnMode,
 };
@@ -1684,11 +1684,19 @@ pub(super) async fn remove_local_persisted_observed(
                     "cannot remove sandbox {name:?}: selected runtime has not exited"
                 )));
             }
-        } else if expected.run_id.is_some() {
-            // A terminal historical row carries no evidence that its runtime
-            // implemented today's lifecycle lock. Creating/acquiring a lock
-            // now cannot retroactively prove that process exited.
-            return Err(crate::MicrosandboxError::LaunchBindingUnsupported);
+        } else if let Some(run_id) = expected.run_id {
+            // A terminal observation retains no process. The recorded run row
+            // is the exit evidence: it reaches Terminated only from the owning
+            // runtime's final report or from stale reconciliation after a
+            // pid-liveness check, so a Terminated row may proceed. Any other
+            // state still fails closed.
+            let terminal = run_entity::Entity::find_by_id(run_id)
+                .one(local_backend.db().await?.read())
+                .await?
+                .is_some_and(|model| model.status == run_entity::RunStatus::Terminated);
+            if !terminal {
+                return Err(crate::MicrosandboxError::LaunchBindingUnsupported);
+            }
         }
     }
 
@@ -1808,8 +1816,9 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        MAX_HOSTNAME_BYTES, MAX_SANDBOX_NAME_BYTES, SandboxStatus, ephemeral_cleanup_stop_result,
-        hostname_from_sandbox_name, remove_dir_if_exists, remove_local_persisted_sandbox,
+        LocalObservation, MAX_HOSTNAME_BYTES, MAX_SANDBOX_NAME_BYTES, SandboxStatus,
+        ephemeral_cleanup_stop_result, hostname_from_sandbox_name, remove_dir_if_exists,
+        remove_local_persisted_observed, remove_local_persisted_sandbox,
         sandbox_not_found_for_name, validate_hostname,
     };
     use crate::backend::LocalBackend;
@@ -2113,5 +2122,107 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn observed_removal_accepts_terminal_run_history()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::db::entity::run as run_entity;
+
+        let temp = tempdir()?;
+        let backend = LocalBackend::builder()
+            .home(temp.path().join("home"))
+            .build()
+            .await?;
+        let pools = backend.db().await?;
+        let sandbox = super::sandbox_entity::ActiveModel {
+            name: Set("terminal-history".to_string()),
+            config: Set("{}".to_string()),
+            status: Set(SandboxStatus::Stopped),
+            ephemeral: Set(false),
+            ..Default::default()
+        }
+        .insert(pools.write())
+        .await?;
+        let run = run_entity::ActiveModel {
+            sandbox_id: Set(sandbox.id),
+            status: Set(run_entity::RunStatus::Terminated),
+            ..Default::default()
+        }
+        .insert(pools.write())
+        .await?;
+        // Handle-bound observation of a terminal record: a historical run id
+        // with no retained process, exactly what `Sandbox::get` captures for a
+        // stopped sandbox that has run before.
+        let observation = LocalObservation::capture(&backend, sandbox.id, Some(run.id), None);
+
+        remove_local_persisted_observed(
+            &backend,
+            "terminal-history",
+            sandbox.id,
+            Some(&observation),
+        )
+        .await?;
+
+        let remaining = super::sandbox_entity::Entity::find_by_id(sandbox.id)
+            .one(pools.read())
+            .await?;
+        assert!(remaining.is_none());
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn observed_removal_rejects_unterminated_run_history()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::db::entity::run as run_entity;
+
+        let temp = tempdir()?;
+        let backend = LocalBackend::builder()
+            .home(temp.path().join("home"))
+            .build()
+            .await?;
+        let pools = backend.db().await?;
+        let sandbox = super::sandbox_entity::ActiveModel {
+            name: Set("live-history".to_string()),
+            config: Set("{}".to_string()),
+            status: Set(SandboxStatus::Stopped),
+            ephemeral: Set(false),
+            ..Default::default()
+        }
+        .insert(pools.write())
+        .await?;
+        // A non-terminal row without retained process evidence must still fail
+        // closed: nothing proves the recorded runtime exited.
+        let run = run_entity::ActiveModel {
+            sandbox_id: Set(sandbox.id),
+            status: Set(run_entity::RunStatus::Running),
+            ..Default::default()
+        }
+        .insert(pools.write())
+        .await?;
+        let observation = LocalObservation::capture(&backend, sandbox.id, Some(run.id), None);
+
+        let result = remove_local_persisted_observed(
+            &backend,
+            "live-history",
+            sandbox.id,
+            Some(&observation),
+        )
+        .await;
+
+        assert!(
+            matches!(
+                &result,
+                Err(crate::MicrosandboxError::LaunchBindingUnsupported)
+            ),
+            "expected LaunchBindingUnsupported, got {result:?}"
+        );
+        let retained = super::sandbox_entity::Entity::find_by_id(sandbox.id)
+            .one(pools.read())
+            .await?;
+        assert!(retained.is_some());
+        Ok(())
     }
 }
