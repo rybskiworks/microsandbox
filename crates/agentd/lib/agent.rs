@@ -559,19 +559,16 @@ async fn handle_message(
             let Some(stdin) = decode_payload_or_core_error::<ExecStdin>(&msg, out_buf)? else {
                 return Ok(());
             };
-            if let Some(session) = state.sessions.get_mut(&msg.id) {
-                if let Err(e) = session.enqueue_stdin(stdin.data) {
-                    let payload = stdin_error_payload(&e);
-                    eprintln!("stdin write error on session {}: {e}", msg.id);
-                    let reply =
-                        Message::with_payload(MessageType::ExecStdinError, msg.id, &payload)
-                            .map_err(|e| {
-                                AgentdError::ExecSession(format!("encode stdin error: {e}"))
-                            })?;
-                    codec::encode_to_buf(&reply, out_buf).map_err(|e| {
-                        AgentdError::ExecSession(format!("encode stdin error frame: {e}"))
-                    })?;
-                }
+            if let Some(session) = state.sessions.get_mut(&msg.id)
+                && let Err(e) = session.enqueue_stdin(stdin.data)
+            {
+                let payload = stdin_error_payload(&e);
+                eprintln!("stdin write error on session {}: {e}", msg.id);
+                let reply = Message::with_payload(MessageType::ExecStdinError, msg.id, &payload)
+                    .map_err(|e| AgentdError::ExecSession(format!("encode stdin error: {e}")))?;
+                codec::encode_to_buf(&reply, out_buf).map_err(|e| {
+                    AgentdError::ExecSession(format!("encode stdin error frame: {e}"))
+                })?;
             }
         }
 
