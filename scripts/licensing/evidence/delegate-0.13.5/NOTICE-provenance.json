@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "package": {
+    "name": "delegate",
+    "version": "0.13.5",
+    "source": "registry+https://github.com/rust-lang/crates.io-index",
+    "checksum": "780eb241654bf097afb00fc5f054a09b687dad862e485fdcf8399bb056565370"
+  },
+  "manifest_sha256": "42d8d439b03ca6b4340c03c86c96e21ca91c7eb64167dc5cfbeaffea10a4af46",
+  "upstream": {
+    "repository": "https://github.com/kobzol/rust-delegate",
+    "revision": "b129d4cbf4cc499eff7743365dcb0fe5d8d2e820",
+    "manifest": "Cargo.toml",
+    "manifest_git_blob": "b963abba7bde921d7fb5e0ad9a6138404e0c0779",
+    "license_git_blobs": {
+      "LICENSE-MIT": "688d43f92fad946c826ac49c4edf7ec280fdad66",
+      "LICENSE-APACHE": "8dada3edaf50dbc082c9a125058f25def75e625a"
+    }
+  },
+  "documents": {
+    "LICENSE-MIT": "be7ee8aa49dc586023669a0c600a0536fce6a9f61264a53a67cdd842564ed899",
+    "LICENSE-APACHE": "b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1"
+  },
+  "reason": "The build reported no original legal files in this registry package. Retain the upstream repository-root MIT and Apache-2.0 texts without altering the vendored crate or its license expression. The approved original manifest must match byte-for-byte; the archive checksum must match Cargo.lock. This is version-scoped supplemental evidence, not a general license fallback.",
+  "verification": "The annotated upstream tag v0.13.5 peels to this commit, whose root Cargo.toml declares version 0.13.5. Upstream files were fetched at this immutable revision and checked against their Git blob hashes, which match the GitHub tree listing at this revision. The registry checksum was taken from the lockfile-derived contract. The build host verifies the published Cargo.toml.orig and lock checksum; the actual registry archive was not downloaded in the editing environment."
+}
