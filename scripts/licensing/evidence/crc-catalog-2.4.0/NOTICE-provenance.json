@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "package": {
+    "name": "crc-catalog",
+    "version": "2.4.0",
+    "source": "registry+https://github.com/rust-lang/crates.io-index",
+    "checksum": "19d374276b40fb8bbdee95aef7c7fa6b5316ec764510eb64b8dd0e2ed0d7e7f5"
+  },
+  "manifest_sha256": "2ce61392e0a3ee40c2e3075e247f3e74419df546bbf4bd80f0eef021d234a763",
+  "upstream": {
+    "repository": "https://github.com/akhilles/crc-catalog.git",
+    "revision": "b500ea693c552f8d946e290722a7b3ee8b9a7ee2",
+    "manifest": "Cargo.toml",
+    "manifest_git_blob": "f0083ab41e8b906724caa60f7d0045b93aefcd1e",
+    "license_git_blobs": {
+      "LICENSE-MIT": "92cbf78947298b385d3bcb0d2a2501ec8d190928",
+      "LICENSE-APACHE": "545ca53e3050de0357fe603ca636e0e14b5ecfaa"
+    }
+  },
+  "documents": {
+    "LICENSE-MIT": "5ef8fcfb6cccec8fcae043c834099a60c8b7406408db576e026d2b7e67dc5cf5",
+    "LICENSE-APACHE": "d3cdb764b98283ee7c3a3cea8d374e2a2957322374378d1f3263f4d512741fc3"
+  },
+  "reason": "The build reported no original legal files in this registry package: the published archive carries its license texts only inside a LICENSES/ directory, which the harvester skips. Retain the upstream MIT and Apache-2.0 texts without altering the vendored crate or its license expression. The approved original manifest must match byte-for-byte; the archive checksum must match Cargo.lock. This is version-scoped supplemental evidence, not a general license fallback.",
+  "verification": "The annotated upstream tag 2.4.0 peels to this commit, whose root Cargo.toml declares version 2.4.0. Upstream files LICENSES/MIT.txt and LICENSES/Apache-2.0.txt were fetched at this immutable revision and stored here as LICENSE-MIT and LICENSE-APACHE (byte-identical content, unchanged Git blob hashes) to satisfy the legal-filename convention; every blob hash was recomputed with git hash-object and matches the GitHub tree listing at this revision. The registry checksum was taken from the lockfile-derived contract. The build host verifies the published Cargo.toml.orig and lock checksum; the actual registry archive was not downloaded in the editing environment."
+}

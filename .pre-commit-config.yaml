@@ -6,9 +6,9 @@ repos:
     hooks:
       - id: check-merge-conflict
       - id: end-of-file-fixer
-        exclude: ^vendor/
+        exclude: ^(vendor/|scripts/licensing/evidence/)
       - id: trailing-whitespace
-        exclude: ^vendor/
+        exclude: ^(vendor/|scripts/licensing/evidence/)
       - id: check-toml
       - id: check-yaml
 

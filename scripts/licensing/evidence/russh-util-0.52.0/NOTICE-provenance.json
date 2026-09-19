@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "package": {
+    "name": "russh-util",
+    "version": "0.52.0",
+    "source": "registry+https://github.com/rust-lang/crates.io-index",
+    "checksum": "668424a5dde0bcb45b55ba7de8476b93831b4aa2fa6947e145f3b053e22c60b6"
+  },
+  "manifest_sha256": "4bb59fc5468939da7a73e8c7356da3632b7686d08b08d43eb5d0a3c63447849f",
+  "upstream": {
+    "repository": "https://github.com/warp-tech/russh",
+    "revision": "a404ae31ccb192ad4ef65ac8a65ad96bac2f77f6",
+    "manifest": "russh-util/Cargo.toml",
+    "manifest_git_blob": "2c36a6c2a3618e514726e17886d4d68fb53bd89a",
+    "license_git_blobs": {
+      "LICENSE-2.0.txt": "d645695673349e3947e8e5ae42332d0ac3164cd7"
+    }
+  },
+  "documents": {
+    "LICENSE-2.0.txt": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "reason": "The build reported no original legal files in this registry package. Retain the upstream repository-root Apache-2.0 text without altering the vendored crate or its license expression. The approved original manifest must match byte-for-byte; the archive checksum must match Cargo.lock. This is version-scoped supplemental evidence, not a general license fallback.",
+  "verification": "Upstream files were fetched at this immutable revision and checked against their Git blob hashes. The revision is the lightweight tag v0.52.0 resolved via git ls-remote; russh-util/Cargo.toml at that commit declares version 0.52.0, and its blob hash was cross-checked against the GitHub tree API. The registry checksum was read from rust-lang/crates.io-index. The build host verifies the published Cargo.toml.orig and lock checksum; the actual registry archive was not downloaded in the editing environment."
+}
