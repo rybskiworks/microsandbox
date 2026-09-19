@@ -763,6 +763,7 @@ impl PolicyStore {
 
     /// Select one complete record before any upstream dial or credential use.
     /// Username comes from SSH authentication, not the host diversion prelude.
+    #[allow(clippy::too_many_arguments)]
     pub fn admit(
         &mut self,
         fence: ManagementFence,
