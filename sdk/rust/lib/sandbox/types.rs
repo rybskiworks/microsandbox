@@ -63,6 +63,7 @@ pub struct MountBuilder {
     quota_mib: Option<u32>,
     disk_format: Option<DiskImageFormat>,
     disk_fstype: Option<String>,
+    attach_only: bool,
     stat_virtualization: Option<StatVirtualization>,
     host_permissions: Option<HostPermissions>,
     follow_root_symlinks: bool,
@@ -213,6 +214,7 @@ impl MountBuilder {
             quota_mib: None,
             disk_format: None,
             disk_fstype: None,
+            attach_only: false,
             stat_virtualization: None,
             host_permissions: None,
             follow_root_symlinks: false,
@@ -300,6 +302,25 @@ impl MountBuilder {
             return self;
         }
         self.disk_fstype = Some(fstype);
+        self
+    }
+
+    /// Attach the disk device without mounting it inside the guest.
+    ///
+    /// With this set, the disk is attached as a virtio-blk device but excluded
+    /// from the agentd bootstrap mount list. Agentd does not attempt to mount
+    /// it, allowing the guest to open containers such as `crypto_LUKS` itself.
+    /// Identify the device by its virtio serial, derived from the guest path,
+    /// using `/dev/disk/by-id/virtio-<id>` when available or matching
+    /// `/sys/block/*/serial`. Device-letter allocation is not a stable identity.
+    ///
+    /// Available only on the local backend; cloud creation rejects this option.
+    ///
+    /// Only valid alongside [`Self::disk`]. Calling on bind / named / tmpfs
+    /// mounts produces an error when the surrounding `SandboxBuilder` is
+    /// finalized so the option does not silently get dropped.
+    pub fn attach_only(mut self) -> Self {
+        self.attach_only = true;
         self
     }
 
@@ -462,6 +483,11 @@ impl MountBuilder {
                 ".fstype() is only valid for disk image mounts".into(),
             ));
         }
+        if self.attach_only && !is_disk {
+            return Err(crate::MicrosandboxError::InvalidConfig(
+                ".attach_only() is only valid for disk image mounts".into(),
+            ));
+        }
         if self.stat_virtualization.is_some() && !is_virtiofs {
             return Err(crate::MicrosandboxError::InvalidConfig(
                 ".stat_virtualization() is only valid for bind and directory-backed named volume mounts"
@@ -576,6 +602,7 @@ impl MountBuilder {
                     guest: self.guest,
                     format,
                     fstype: self.disk_fstype,
+                    attach_only: self.attach_only,
                     options: self.options,
                 }
             }
@@ -1641,6 +1668,7 @@ mod tests {
             guest: "/data".to_string(),
             format: DiskImageFormat::Raw,
             fstype: None,
+            attach_only: false,
             options: MountOptions::default(),
         };
 
@@ -1656,6 +1684,7 @@ mod tests {
                 guest: "/data".to_string(),
                 format: DiskImageFormat::Raw,
                 fstype: None,
+                attach_only: false,
                 options: MountOptions::default(),
             },
             VolumeMount::Tmpfs {
@@ -1689,6 +1718,7 @@ mod tests {
                 guest: "/disk".to_string(),
                 format: DiskImageFormat::Raw,
                 fstype: None,
+                attach_only: false,
                 options: MountOptions::default(),
             },
         ];
@@ -1703,6 +1733,7 @@ mod tests {
             guest: "/data".to_string(),
             format: DiskImageFormat::Raw,
             fstype: Some(String::new()),
+            attach_only: false,
             options: MountOptions::default(),
         };
 
@@ -1891,6 +1922,79 @@ mod tests {
                 other => panic!("expected DiskImage for {path}, got {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn test_mount_builder_attach_only_flags_disk_mount() -> crate::MicrosandboxResult<()> {
+        let mount = MountBuilder::new("/ssd3")
+            .disk("/host/ssd3.raw")
+            .attach_only()
+            .build()?;
+        let VolumeMount::DiskImage {
+            attach_only, guest, ..
+        } = mount
+        else {
+            panic!("expected DiskImage");
+        };
+        assert!(attach_only);
+        assert_eq!(guest, "/ssd3");
+        Ok(())
+    }
+
+    #[test]
+    fn test_mount_builder_attach_only_defaults_off() -> crate::MicrosandboxResult<()> {
+        let mount = MountBuilder::new("/data").disk("/host/data.raw").build()?;
+        let VolumeMount::DiskImage { attach_only, .. } = mount else {
+            panic!("expected DiskImage");
+        };
+        assert!(!attach_only);
+        Ok(())
+    }
+
+    #[test]
+    fn test_mount_builder_attach_only_rejected_on_bind() {
+        let result = MountBuilder::new("/data")
+            .bind("/host/data")
+            .attach_only()
+            .build();
+        assert!(
+            matches!(&result, Err(crate::MicrosandboxError::InvalidConfig(_))),
+            "expected InvalidConfig"
+        );
+        let err = match result {
+            Err(err) => err,
+            Ok(_) => panic!("attach_only on a bind mount must fail"),
+        };
+        assert!(
+            err.to_string()
+                .contains(".attach_only() is only valid for disk image mounts"),
+            "unexpected message: {err}"
+        );
+    }
+
+    #[test]
+    fn test_mount_builder_attach_only_serialization_stays_byte_identical_when_off()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mount = MountBuilder::new("/data").disk("/host/data.raw").build()?;
+        let json = serde_json::to_string(&mount)?;
+        assert!(!json.contains("attach_only"), "serialized: {json}");
+        Ok(())
+    }
+
+    #[test]
+    fn test_mount_builder_attach_only_round_trips_when_on() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mount = MountBuilder::new("/ssd3")
+            .disk("/host/ssd3.raw")
+            .attach_only()
+            .build()?;
+        let json = serde_json::to_string(&mount)?;
+        let back: VolumeMount = serde_json::from_str(&json)?;
+        let VolumeMount::DiskImage { attach_only, .. } = back else {
+            panic!("expected DiskImage");
+        };
+        assert!(attach_only);
+        Ok(())
     }
 
     #[test]

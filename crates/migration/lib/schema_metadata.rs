@@ -51,6 +51,9 @@ pub const SANDBOX_NETWORK_SLOT_MIGRATION_ID: &str = "m20260818_000001_sandbox_ne
 /// Migration that prevents old binaries from discarding persisted mount ownership.
 pub const MOUNT_OWNER_CONFIG_MIGRATION_ID: &str = "m20260824_000001_mount_owner_config";
 
+/// Migration that prevents old binaries from mounting attach-only disks.
+pub const ATTACH_ONLY_DISK_CONFIG_MIGRATION_ID: &str = "m20260930_000001_attach_only_disk_config";
+
 /// Frozen migration baseline for the transitional 0.6.0 release.
 ///
 /// The released 0.6.0 binary predates `msb __schema-baseline --json`, so
@@ -255,6 +258,13 @@ pub const MIGRATION_METADATA: &[MigrationMetadata] = &[
         affects_user_data: false,
         summary: "retain the compatible sandbox network slot column",
     },
+    MigrationMetadata {
+        id: ATTACH_ONLY_DISK_CONFIG_MIGRATION_ID,
+        reversible: true,
+        affects_cache: false,
+        affects_user_data: false,
+        summary: "remove the compatibility marker after confirming no persisted attach-only disks",
+    },
 ];
 
 //--------------------------------------------------------------------------------------------------
@@ -339,8 +349,9 @@ mod tests {
     }
 
     #[test]
-    fn canonical_applied_prefix_uses_metadata_order() {
+    fn canonical_applied_prefix_uses_metadata_order() -> Result<(), Box<dyn std::error::Error>> {
         let applied = [
+            ATTACH_ONLY_DISK_CONFIG_MIGRATION_ID,
             MOUNT_OWNER_CONFIG_MIGRATION_ID,
             SANDBOX_NETWORK_SLOT_MIGRATION_ID,
             SHARED_CPU_ALLOCATION_MIGRATION_ID,
@@ -357,8 +368,9 @@ mod tests {
             .collect();
         all_applied.extend(applied);
 
-        let prefix = canonical_applied_prefix(all_applied).expect("valid unordered prefix");
+        let prefix = canonical_applied_prefix(all_applied).ok_or("invalid unordered prefix")?;
         assert_eq!(prefix, MIGRATION_METADATA);
+        Ok(())
     }
 
     #[test]

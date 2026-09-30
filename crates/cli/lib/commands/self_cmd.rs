@@ -3467,23 +3467,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rollback_schema_steps_through_latest_migrations() {
-        let dir = tempfile::tempdir().unwrap();
+    async fn rollback_schema_steps_through_latest_migrations()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let dir = tempfile::tempdir()?;
         let db_path = dir.path().join("msb.db");
         let db = microsandbox_db::connection::DbWriteConnection::open(
             &db_path,
             std::time::Duration::from_secs(5),
             std::time::Duration::from_secs(5),
         )
-        .await
-        .unwrap();
-        Migrator::up(db.inner(), None).await.unwrap();
+        .await?;
+        Migrator::up(db.inner(), None).await?;
+
+        // The newest marker permits rollback because this fixture contains
+        // no sandbox configuration that requires attach-only disk semantics.
+        rollback_schema(db.inner(), 1).await?;
+        let rows = db
+            .query_all_raw(Statement::from_sql_and_values(
+                DatabaseBackend::Sqlite,
+                "SELECT version FROM seaql_migrations WHERE version = ?",
+                [schema_metadata::ATTACH_ONLY_DISK_CONFIG_MIGRATION_ID.into()],
+            ))
+            .await?;
+        assert!(rows.is_empty(), "attach-only marker should be rolled back");
 
         // The backdated network-slot migration was released after the
-        // owner-compatibility marker, so it is the first migration rolled back.
+        // owner-compatibility marker, so it is the next migration rolled back.
         // It leaves its compatible SQLite column and constraints in place, but
         // removes the migration record.
-        rollback_schema(db.inner(), 1).await.unwrap();
+        rollback_schema(db.inner(), 1).await?;
 
         let rows = db
             .query_all_raw(Statement::from_sql_and_values(
@@ -3491,8 +3503,7 @@ mod tests {
                 "SELECT version FROM seaql_migrations WHERE version = ?",
                 [schema_metadata::SANDBOX_NETWORK_SLOT_MIGRATION_ID.into()],
             ))
-            .await
-            .unwrap();
+            .await?;
         assert!(
             rows.is_empty(),
             "network slot migration should be rolled back"
@@ -3503,19 +3514,18 @@ mod tests {
                 DatabaseBackend::Sqlite,
                 "PRAGMA table_info(sandbox)",
             ))
-            .await
-            .unwrap();
+            .await?;
         assert!(
             columns
                 .iter()
-                .any(|row| row.try_get_by_index::<String>(1).unwrap() == "network_slot"),
+                .any(|row| matches!(row.try_get_by_index::<String>(1), Ok(name) if name == "network_slot")),
             "network slot column should remain compatible after rollback"
         );
 
         // The owner-compatibility marker has no schema objects of its own. With
         // no persisted sandboxes, its preflight permits rollback and removes
         // only the migration record.
-        rollback_schema(db.inner(), 1).await.unwrap();
+        rollback_schema(db.inner(), 1).await?;
 
         let rows = db
             .query_all_raw(Statement::from_sql_and_values(
@@ -3523,14 +3533,13 @@ mod tests {
                 "SELECT version FROM seaql_migrations WHERE version = ?",
                 [schema_metadata::MOUNT_OWNER_CONFIG_MIGRATION_ID.into()],
             ))
-            .await
-            .unwrap();
+            .await?;
         assert!(rows.is_empty(), "mount owner marker should be rolled back");
 
-        // Shared CPU assignment rows downgrade first. Active sandboxes are
+        // Shared CPU assignment rows downgrade next. Active sandboxes are
         // prohibited during schema rollback, so the allocation table is empty
         // and can safely return to its exclusive logical-CPU key.
-        rollback_schema(db.inner(), 1).await.unwrap();
+        rollback_schema(db.inner(), 1).await?;
 
         let rows = db
             .query_all_raw(Statement::from_sql_and_values(
@@ -3538,8 +3547,7 @@ mod tests {
                 "SELECT version FROM seaql_migrations WHERE version = ?",
                 [schema_metadata::SHARED_CPU_ALLOCATION_MIGRATION_ID.into()],
             ))
-            .await
-            .unwrap();
+            .await?;
         assert!(
             rows.is_empty(),
             "shared CPU allocation should be rolled back"
@@ -3548,7 +3556,7 @@ mod tests {
         // The label rebuild is compatible with older releases, so its down
         // migration only removes the migration record. NUMA memory and
         // writeback state must remain until their own rollback steps.
-        rollback_schema(db.inner(), 1).await.unwrap();
+        rollback_schema(db.inner(), 1).await?;
 
         let rows = db
             .query_all_raw(Statement::from_sql_and_values(
@@ -3556,8 +3564,7 @@ mod tests {
                 "SELECT version FROM seaql_migrations WHERE version = ?",
                 [schema_metadata::SANDBOX_LABEL_REBUILD_MIGRATION_ID.into()],
             ))
-            .await
-            .unwrap();
+            .await?;
         assert!(rows.is_empty(), "label rebuild should be rolled back");
 
         let rows = db
@@ -3565,23 +3572,21 @@ mod tests {
                 DatabaseBackend::Sqlite,
                 "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'writeback_allocation'",
             ))
-            .await
-            .unwrap();
+            .await?;
         assert_eq!(
             rows.len(),
             1,
             "writeback allocation should remain after one rollback"
         );
 
-        rollback_schema(db.inner(), 1).await.unwrap();
+        rollback_schema(db.inner(), 1).await?;
 
         let rows = db
             .query_all_raw(Statement::from_string(
                 DatabaseBackend::Sqlite,
                 "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'memory_allocation_node'",
             ))
-            .await
-            .unwrap();
+            .await?;
         assert!(
             rows.is_empty(),
             "NUMA memory allocation should be rolled back"
@@ -3592,23 +3597,21 @@ mod tests {
                 DatabaseBackend::Sqlite,
                 "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'writeback_allocation'",
             ))
-            .await
-            .unwrap();
+            .await?;
         assert_eq!(
             rows.len(),
             1,
             "writeback allocation should remain after NUMA rollback"
         );
 
-        rollback_schema(db.inner(), 1).await.unwrap();
+        rollback_schema(db.inner(), 1).await?;
 
         let rows = db
             .query_all_raw(Statement::from_string(
                 DatabaseBackend::Sqlite,
                 "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'writeback_allocation'",
             ))
-            .await
-            .unwrap();
+            .await?;
         assert!(
             rows.is_empty(),
             "writeback allocation should be rolled back"
@@ -3622,8 +3625,7 @@ mod tests {
                         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = '{table}'"
                     ),
                 ))
-                .await
-                .unwrap();
+                .await?;
             assert!(!rows.is_empty(), "{table} should remain after one rollback");
         }
 
@@ -3632,14 +3634,13 @@ mod tests {
                 DatabaseBackend::Sqlite,
                 "PRAGMA table_info(snapshot_index)",
             ))
-            .await
-            .unwrap();
+            .await?;
         let has_scope = columns
             .iter()
-            .any(|row| row.try_get_by_index::<String>(1).unwrap() == "scope");
-        let has_state_kind = columns
-            .iter()
-            .any(|row| row.try_get_by_index::<String>(1).unwrap() == "state_kind");
+            .any(|row| matches!(row.try_get_by_index::<String>(1), Ok(name) if name == "scope"));
+        let has_state_kind = columns.iter().any(
+            |row| matches!(row.try_get_by_index::<String>(1), Ok(name) if name == "state_kind"),
+        );
         assert!(has_scope);
         assert!(has_state_kind);
 
@@ -3648,8 +3649,7 @@ mod tests {
                 DatabaseBackend::Sqlite,
                 "SELECT name FROM pragma_table_info('sandbox') WHERE name = 'active_config'",
             ))
-            .await
-            .unwrap();
+            .await?;
         assert!(!rows.is_empty());
 
         let rows = db
@@ -3657,9 +3657,9 @@ mod tests {
                 DatabaseBackend::Sqlite,
                 "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'maintenance_lease'",
             ))
-            .await
-            .unwrap();
+            .await?;
         assert!(!rows.is_empty());
+        Ok(())
     }
 
     #[tokio::test]

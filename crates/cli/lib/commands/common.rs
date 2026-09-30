@@ -153,6 +153,14 @@ pub struct SandboxOpts {
     pub mount_file: Vec<String>,
 
     /// Explicitly mount a disk image into the sandbox (`SOURCE:DEST[:OPTIONS]`).
+    ///
+    /// OPTIONS may include `format=raw|qcow2|vmdk`, `fstype=<type>`, `ro`,
+    /// `noexec`, `nosuid`, `nodev`, and `attach-only`. With `attach-only` the
+    /// device is attached as virtio-blk but never mounted inside the guest
+    /// (it is excluded from the agentd bootstrap mount list), so an
+    /// unmountable container such as a `crypto_LUKS` partition cannot abort
+    /// the boot. The guest finds the device at `/dev/disk/by-id/virtio-<id>`
+    /// (or the next free `/dev/vdX`).
     #[arg(long = "mount-disk", value_name = "SOURCE:DEST[:OPTIONS]")]
     pub mount_disk: Vec<String>,
 
@@ -620,6 +628,7 @@ struct CliMountOptions {
     named_kind: Option<VolumeKind>,
     fstype: Option<String>,
     format: Option<DiskImageFormat>,
+    attach_only: bool,
     override_uid: Option<u32>,
     override_gid: Option<u32>,
 }
@@ -633,6 +642,7 @@ struct CliMountOptionSupport {
     named_kind: bool,
     fstype: bool,
     format: bool,
+    attach_only: bool,
     owner: bool,
 }
 
@@ -1929,6 +1939,7 @@ pub fn apply_explicit_disk_mount(
         CliMountOptionSupport {
             fstype: true,
             format: true,
+            attach_only: true,
             ..CliMountOptionSupport::default()
         },
     )?;
@@ -1943,6 +1954,9 @@ pub fn apply_explicit_disk_mount(
         }
         if let Some(fstype) = options.fstype.as_deref() {
             m = m.fstype(fstype);
+        }
+        if options.attach_only {
+            m = m.attach_only();
         }
         apply_common_mount_options(m, options)
     }))
@@ -2150,6 +2164,7 @@ fn parse_cli_mount_options(
     let mut seen_named_kind = false;
     let mut seen_fstype = false;
     let mut seen_format = false;
+    let mut seen_attach_only = false;
     let mut seen_uid = false;
     let mut seen_gid = false;
 
@@ -2197,6 +2212,16 @@ fn parse_cli_mount_options(
                 }
                 seen_follow_root = true;
                 parsed.follow_root_symlinks = true;
+            }
+            "attach-only" => {
+                if !support.attach_only {
+                    anyhow::bail!("mount option `attach-only` is not valid here");
+                }
+                if seen_attach_only {
+                    anyhow::bail!("mount option `attach-only` specified more than once");
+                }
+                seen_attach_only = true;
+                parsed.attach_only = true;
             }
             "suid" | "exec" | "dev" => {
                 anyhow::bail!("unsupported mount option {opt:?}");
@@ -2298,7 +2323,7 @@ fn parse_cli_mount_options(
                         })?);
                     }
                     "stat-virt" | "host-perms" | "size" | "quota" | "kind" | "fstype"
-                    | "format" | "uid" | "gid" => {
+                    | "format" | "attach-only" | "uid" | "gid" => {
                         anyhow::bail!("mount option `{key}` is not valid here");
                     }
                     other => anyhow::bail!("unknown mount option {other:?}"),
@@ -4076,14 +4101,36 @@ mod tests {
                 guest,
                 format,
                 fstype,
+                attach_only,
                 options,
             } => {
                 assert_eq!(host, disk);
                 assert_eq!(guest, "/data");
                 assert_eq!(format, DiskImageFormat::Qcow2);
                 assert_eq!(fstype.as_deref(), Some("ext4"));
+                assert!(!attach_only);
                 assert!(options.readonly);
                 assert!(options.noexec);
+            }
+            other => panic!("expected DiskImage, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_apply_explicit_disk_mount_attach_only() {
+        let disk = write_temp("not a real filesystem, just validating config");
+        let spec = format!("{}:/ssd3:attach-only,ro", disk.display());
+        let mount = build_explicit(&spec, apply_explicit_disk_mount).await;
+        match mount {
+            VolumeMount::DiskImage {
+                guest,
+                attach_only,
+                options,
+                ..
+            } => {
+                assert_eq!(guest, "/ssd3");
+                assert!(attach_only);
+                assert!(options.readonly);
             }
             other => panic!("expected DiskImage, got {other:?}"),
         }
@@ -4216,6 +4263,37 @@ mod tests {
                 Err(err) => err,
             };
         assert!(err.to_string().contains("not valid here"), "got: {err}");
+    }
+
+    #[test]
+    fn test_apply_explicit_file_rejects_attach_only_option() {
+        let file = write_temp("fixture");
+        let spec = format!("{}:/fixture:attach-only", file.display());
+        let err =
+            match apply_explicit_file_mount(SandboxBuilder::new("test").image("alpine"), &spec) {
+                Ok(_) => panic!("expected mount-file to reject attach-only"),
+                Err(err) => err,
+            };
+        assert!(
+            err.to_string().contains("attach-only") && err.to_string().contains("not valid here"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_apply_explicit_disk_rejects_duplicate_attach_only_option() {
+        let err = match apply_explicit_disk_mount(
+            SandboxBuilder::new("test").image("alpine"),
+            "/tmp/disk.raw:/data:attach-only,attach-only",
+        ) {
+            Ok(_) => panic!("expected mount-disk to reject duplicate attach-only"),
+            Err(err) => err,
+        };
+        assert!(
+            err.to_string()
+                .contains("attach-only` specified more than once"),
+            "got: {err}"
+        );
     }
 
     fn expect_apply_volume_err(spec: &str) -> String {
