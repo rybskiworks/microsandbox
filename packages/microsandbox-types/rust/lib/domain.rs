@@ -459,7 +459,6 @@ pub enum VolumeMount {
         /// `id` is derived from the guest path) or as the next free
         /// `/dev/vdX`. Defaults to `false`: the disk is mounted at
         /// `guest` after boot as before.
-        #[serde(default, skip_serializing_if = "is_false")]
         attach_only: bool,
     },
 }
