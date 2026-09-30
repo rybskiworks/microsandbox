@@ -360,6 +360,8 @@ npm install
 npm start
 ```
 
+Rust-only binding tests run with `cargo test -p microsandbox-node --lib` from the repository root. Their dev-dependency enables dynamic N-API symbol resolution so tests that do not call Node APIs can execute outside a Node process. Ordinary addon builds keep their existing feature set; Node API behavior is exercised by `npm test` under Node.
+
 ## License
 
 Apache-2.0
