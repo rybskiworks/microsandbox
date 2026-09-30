@@ -1889,14 +1889,23 @@ impl Serialize for VolumeMount {
                 format,
                 fstype,
                 options,
+                attach_only,
             } => {
-                let mut map = serializer.serialize_map(Some(6))?;
+                // The map length hint must match the emitted entries exactly:
+                // length-prefixed formats rely on it.
+                let field_count = if *attach_only { 7 } else { 6 };
+                let mut map = serializer.serialize_map(Some(field_count))?;
                 map.serialize_entry("type", "DiskImage")?;
                 map.serialize_entry("host", host)?;
                 map.serialize_entry("guest", guest)?;
                 map.serialize_entry("format", format)?;
                 map.serialize_entry("fstype", fstype)?;
                 map.serialize_entry("options", options)?;
+                // Emit the flag only when set, so the default-off bytes stay
+                // identical to the pre-`attach_only` payload.
+                if *attach_only {
+                    map.serialize_entry("attach_only", attach_only)?;
+                }
                 map.end()
             }
         }
@@ -1967,6 +1976,8 @@ impl<'de> Deserialize<'de> for VolumeMount {
                 options: Option<MountOptions>,
                 #[serde(default)]
                 readonly: bool,
+                #[serde(default)]
+                attach_only: bool,
             },
         }
 
@@ -2026,12 +2037,14 @@ impl<'de> Deserialize<'de> for VolumeMount {
                 fstype,
                 options,
                 readonly,
+                attach_only,
             } => Self::DiskImage {
                 host,
                 guest,
                 format,
                 fstype,
                 options: decode_mount_options(options, readonly),
+                attach_only,
             },
         })
     }
@@ -2094,6 +2107,7 @@ impl fmt::Debug for VolumeMount {
                 format,
                 fstype,
                 options,
+                attach_only,
             } => f
                 .debug_struct("DiskImage")
                 .field("host", host)
@@ -2101,6 +2115,7 @@ impl fmt::Debug for VolumeMount {
                 .field("format", format)
                 .field("fstype", fstype)
                 .field("options", options)
+                .field("attach_only", attach_only)
                 .finish(),
         }
     }
@@ -3327,5 +3342,55 @@ mod tests {
         assert!(format!("{mount:?}").contains("mount_policy"));
         let value = serde_json::to_value(&mount).unwrap();
         assert_eq!(value["mount_policy"], "/some/path.json");
+    }
+
+    #[test]
+    fn disk_image_attach_off_keeps_legacy_wire_bytes() -> Result<(), Box<dyn std::error::Error>> {
+        // `VolumeMount` serializes through a manual `Serialize` impl, so the
+        // `skip_serializing_if` attribute on `attach_only` has no effect there:
+        // the impl must emit the field only when it is set.
+        let mount = VolumeMount::DiskImage {
+            host: PathBuf::from("/images/root.img"),
+            guest: "/mnt/img".to_owned(),
+            format: DiskImageFormat::Qcow2,
+            fstype: None,
+            options: MountOptions::default(),
+            attach_only: false,
+        };
+
+        // Exact pre-`attach_only` payload for this mount.
+        let legacy = concat!(
+            r#"{"type":"DiskImage","host":"/images/root.img","guest":"/mnt/img","#,
+            r#""format":"Qcow2","fstype":null,"#,
+            r#""options":{"readonly":false,"noexec":false,"nosuid":false,"nodev":false}}"#,
+        );
+        let json = serde_json::to_string(&mount)?;
+        assert_eq!(json.as_str(), legacy);
+
+        // A legacy payload without the field decodes to the default.
+        let decoded: VolumeMount = serde_json::from_str(legacy)?;
+        let VolumeMount::DiskImage { attach_only, .. } = decoded else {
+            return Err("expected a disk image mount".into());
+        };
+        assert!(!attach_only);
+
+        // The flag round-trips, and is emitted, once it is set.
+        let attached = VolumeMount::DiskImage {
+            host: PathBuf::from("/images/root.img"),
+            guest: "/mnt/img".to_owned(),
+            format: DiskImageFormat::Qcow2,
+            fstype: None,
+            options: MountOptions::default(),
+            attach_only: true,
+        };
+        let attached_json = serde_json::to_string(&attached)?;
+        assert!(attached_json.contains(r#""attach_only":true"#));
+        let decoded: VolumeMount = serde_json::from_str(&attached_json)?;
+        let VolumeMount::DiskImage { attach_only, .. } = decoded else {
+            return Err("expected a disk image mount".into());
+        };
+        assert!(attach_only);
+
+        Ok(())
     }
 }
