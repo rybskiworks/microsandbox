@@ -531,6 +531,17 @@ fn reject_dropped_cloud_create_fields(config: &SandboxConfig) -> MicrosandboxRes
         return Err(unsupported("named volume inline create"));
     }
     if config.spec.mounts.iter().any(|mount| {
+        matches!(
+            mount,
+            microsandbox_types::VolumeMount::DiskImage {
+                attach_only: true,
+                ..
+            }
+        )
+    }) {
+        return Err(unsupported("attach-only disk"));
+    }
+    if config.spec.mounts.iter().any(|mount| {
         let options = match mount {
             microsandbox_types::VolumeMount::Bind { options, .. }
             | microsandbox_types::VolumeMount::Named { options, .. }
@@ -1101,6 +1112,41 @@ mod tests {
         });
 
         assert_unsupported_config_field(config, "named volume inline create");
+    }
+
+    #[test]
+    fn cloud_create_request_rejects_attach_only_disk() -> Result<(), Box<dyn std::error::Error>> {
+        let mut config = base_cloud_config();
+        config.spec.mounts.push(
+            crate::sandbox::MountBuilder::new("/data")
+                .disk("/host/data.raw")
+                .attach_only()
+                .build()?,
+        );
+        assert!(matches!(
+            CloudCreateBody::try_from(config),
+            Err(MicrosandboxError::Unsupported {
+                op: Operation::SandboxCreate,
+                reason: UnsupportedReason::ConfigField("attach-only disk"),
+            })
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn cloud_create_request_accepts_mounted_disk() -> Result<(), Box<dyn std::error::Error>> {
+        let mut config = base_cloud_config();
+        config.spec.mounts.push(
+            crate::sandbox::MountBuilder::new("/data")
+                .disk("/host/data.raw")
+                .build()?,
+        );
+        let request = CloudCreateBody::try_from(config)?;
+        assert!(matches!(
+            request.envelope.spec.mounts.as_slice(),
+            [microsandbox_types::CloudVolumeMount::DiskImage { .. }]
+        ));
+        Ok(())
     }
 
     #[test]

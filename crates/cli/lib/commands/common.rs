@@ -4290,7 +4290,8 @@ mod tests {
             Err(err) => err,
         };
         assert!(
-            err.to_string().contains("attach-only` specified more than once"),
+            err.to_string()
+                .contains("attach-only` specified more than once"),
             "got: {err}"
         );
     }

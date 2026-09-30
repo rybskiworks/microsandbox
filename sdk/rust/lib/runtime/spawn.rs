@@ -4923,10 +4923,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_sandbox_cli_args_disk_image_attach_only_excludes_bootstrap_mount() -> Result<
-        (),
-        Box<dyn std::error::Error>,
-    > {
+    async fn test_sandbox_cli_args_disk_image_attach_only_excludes_bootstrap_mount()
+    -> Result<(), Box<dyn std::error::Error>> {
         let dir = tempfile::tempdir()?;
         let host = dir.path().join("ssd3.raw");
         std::fs::write(&host, []).map_err(Box::<dyn std::error::Error>::from)?;
@@ -4949,9 +4947,11 @@ mod tests {
         );
 
         // The device must NOT appear in the agentd bootstrap mount list: the
-        // guest kernel never tries to mount it and boot cannot abort on it.
+        // guest agent must not attempt to mount an opaque attached device.
         assert!(
-            !rendered.iter().any(|arg| arg.starts_with("MSB_DISK_MOUNTS=")),
+            !rendered
+                .iter()
+                .any(|arg| arg.starts_with("MSB_DISK_MOUNTS=")),
             "attach-only disk leaked into MSB_DISK_MOUNTS: {rendered:?}"
         );
         Ok(())

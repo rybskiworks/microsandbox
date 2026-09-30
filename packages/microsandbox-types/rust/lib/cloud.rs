@@ -727,7 +727,8 @@ impl From<VolumeMount> for CloudVolumeMount {
                 options,
                 // Attach-only is a host-local launch property: the device is
                 // attached but never mounted by agentd, which the cloud wire
-                // format does not express. Dropped here deliberately.
+                // format does not express. The SDK cloud-create boundary
+                // rejects it before this conversion.
                 attach_only: _,
             } => CloudVolumeMount::DiskImage {
                 host,

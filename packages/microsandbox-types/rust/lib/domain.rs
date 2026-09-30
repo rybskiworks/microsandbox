@@ -399,6 +399,7 @@ pub enum VolumeMount {
         quota_mib: Option<u32>,
         /// Optional path to a compiled mount path-policy program JSON file (spec 22 §12), confined
         /// to the approved host state directory at load time. `None` means no masking.
+        #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
         mount_policy: Option<PathBuf>,
     },
 

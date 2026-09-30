@@ -1394,7 +1394,9 @@ Set the inner filesystem type for a [`.disk()`](#mb-disk) mount, for example `"e
 fn attach_only(self) -> Self
 ```
 
-Attach the disk device without mounting it inside the guest. The disk is attached as a virtio-blk device but excluded from the agentd bootstrap mount list, so the guest kernel never tries to mount it and boot cannot abort on an unmountable container such as a `crypto_LUKS` partition. The guest opens and mounts the device itself, finding it deterministically at `/dev/disk/by-id/virtio-<id>` (the `id` is derived from the guest path) or as the next free `/dev/vdX`. Valid only with [`.disk()`](#mb-disk); calling it on a bind, named, or tmpfs mount errors when the `SandboxBuilder` is finalized.
+Attach the disk device without mounting it inside the guest. The disk is attached as a virtio-blk device but excluded from the agentd bootstrap mount list. The guest opens containers such as `crypto_LUKS` and mounts them itself. Identify the device by its virtio serial, derived from the guest path: use `/dev/disk/by-id/virtio-<id>` when available, or match `/sys/block/*/serial` in a minimal guest without udev. Do not rely on a fixed `/dev/vdX` letter. Valid only with [`.disk()`](#mb-disk); calling it on a bind, named, or tmpfs mount errors when the `SandboxBuilder` is finalized. Cloud creation rejects this local-only option.
+
+Older binaries refuse databases opened by this version until a supported downgrade confirms that no desired or active sandbox configuration retains an attach-only disk.
 
 #### <span className="msb-recv">mount.</span><span className="msb-hn">readonly()</span>
 

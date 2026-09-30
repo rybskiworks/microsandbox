@@ -308,11 +308,13 @@ impl MountBuilder {
     /// Attach the disk device without mounting it inside the guest.
     ///
     /// With this set, the disk is attached as a virtio-blk device but excluded
-    /// from the agentd bootstrap mount list, so the guest kernel never tries
-    /// to mount it and boot cannot abort on an unmountable container (for
-    /// example a `crypto_LUKS` partition). The guest finds the device
-    /// deterministically at `/dev/disk/by-id/virtio-<id>` (the `id` is derived
-    /// from the guest path) or as the next free `/dev/vdX`.
+    /// from the agentd bootstrap mount list. Agentd does not attempt to mount
+    /// it, allowing the guest to open containers such as `crypto_LUKS` itself.
+    /// Identify the device by its virtio serial, derived from the guest path,
+    /// using `/dev/disk/by-id/virtio-<id>` when available or matching
+    /// `/sys/block/*/serial`. Device-letter allocation is not a stable identity.
+    ///
+    /// Available only on the local backend; cloud creation rejects this option.
     ///
     /// Only valid alongside [`Self::disk`]. Calling on bind / named / tmpfs
     /// mounts produces an error when the surrounding `SandboxBuilder` is
@@ -1951,7 +1953,10 @@ mod tests {
 
     #[test]
     fn test_mount_builder_attach_only_rejected_on_bind() {
-        let result = MountBuilder::new("/data").bind("/host/data").attach_only().build();
+        let result = MountBuilder::new("/data")
+            .bind("/host/data")
+            .attach_only()
+            .build();
         assert!(
             matches!(&result, Err(crate::MicrosandboxError::InvalidConfig(_))),
             "expected InvalidConfig"
@@ -1968,10 +1973,8 @@ mod tests {
     }
 
     #[test]
-    fn test_mount_builder_attach_only_serialization_stays_byte_identical_when_off() -> Result<
-        (),
-        Box<dyn std::error::Error>,
-    > {
+    fn test_mount_builder_attach_only_serialization_stays_byte_identical_when_off()
+    -> Result<(), Box<dyn std::error::Error>> {
         let mount = MountBuilder::new("/data").disk("/host/data.raw").build()?;
         let json = serde_json::to_string(&mount)?;
         assert!(!json.contains("attach_only"), "serialized: {json}");
@@ -1979,10 +1982,8 @@ mod tests {
     }
 
     #[test]
-    fn test_mount_builder_attach_only_round_trips_when_on() -> Result<
-        (),
-        Box<dyn std::error::Error>,
-    > {
+    fn test_mount_builder_attach_only_round_trips_when_on() -> Result<(), Box<dyn std::error::Error>>
+    {
         let mount = MountBuilder::new("/ssd3")
             .disk("/host/ssd3.raw")
             .attach_only()
