@@ -63,22 +63,59 @@ fn reject_attach_only(sandbox_id: i32, column: &str, config: &str) -> Result<(),
             "attach_only_downgrade_unrepresentable: sandbox {sandbox_id} {column} is invalid JSON: {error}"
         ))
     })?;
-    let has_attach_only = value
-        .pointer("/spec/mounts")
-        .and_then(serde_json::Value::as_array)
-        .is_some_and(|mounts| {
-            mounts.iter().any(|mount| {
-                mount
-                    .get("attach_only")
-                    .is_some_and(|flag| flag != &serde_json::Value::Bool(false))
-            })
-        });
-    if has_attach_only {
-        return Err(DbErr::Migration(format!(
-            "attach_only_downgrade_unrepresentable: sandbox {sandbox_id} {column} contains an attach-only disk that an older binary would mount"
-        )));
+    let config = value
+        .as_object()
+        .ok_or_else(|| malformed_config(sandbox_id, column, "configuration must be an object"))?;
+    // SandboxConfig flattens SandboxSpec into the durable JSON object.
+    reject_mounts(sandbox_id, column, config)?;
+    // Check the nested form independently if present; neither location may hide the other.
+    if let Some(spec) = config.get("spec") {
+        let spec = spec
+            .as_object()
+            .ok_or_else(|| malformed_config(sandbox_id, column, "spec must be an object"))?;
+        reject_mounts(sandbox_id, column, spec)?;
     }
     Ok(())
+}
+
+fn reject_mounts(
+    sandbox_id: i32,
+    column: &str,
+    spec: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), DbErr> {
+    let Some(mounts) = spec.get("mounts") else {
+        return Ok(());
+    };
+    let mounts = mounts
+        .as_array()
+        .ok_or_else(|| malformed_config(sandbox_id, column, "mounts must be an array"))?;
+    for mount in mounts {
+        let mount = mount
+            .as_object()
+            .ok_or_else(|| malformed_config(sandbox_id, column, "mount must be an object"))?;
+        match mount.get("attach_only") {
+            None | Some(serde_json::Value::Bool(false)) => {}
+            Some(serde_json::Value::Bool(true)) => {
+                return Err(DbErr::Migration(format!(
+                    "attach_only_downgrade_unrepresentable: sandbox {sandbox_id} {column} contains an attach-only disk that an older binary would mount"
+                )));
+            }
+            Some(_) => {
+                return Err(malformed_config(
+                    sandbox_id,
+                    column,
+                    "attach_only must be a boolean",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn malformed_config(sandbox_id: i32, column: &str, reason: &str) -> DbErr {
+    DbErr::Migration(format!(
+        "attach_only_downgrade_unrepresentable: sandbox {sandbox_id} {column} has malformed mount configuration: {reason}"
+    ))
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -125,6 +162,11 @@ mod tests {
     async fn rollback_preserves_compatible_config_bytes() -> Result<(), Box<dyn std::error::Error>>
     {
         for config in [
+            r#"{}"#,
+            r#"{"mounts":[]}"#,
+            r#"{"mounts":[{"type":"DiskImage","attach_only":false}]}"#,
+            r#"{ "mounts": [{"type":"DiskImage"}]}"#,
+            r#"{"mounts":[],"spec":{"mounts":[]}}"#,
             r#"{"spec":{"mounts":[]}}"#,
             r#"{"spec":{"mounts":[{"type":"DiskImage","attach_only":false}]}}"#,
             r#"{ "spec": {"mounts": [{"type":"DiskImage"}]}}"#,
@@ -169,11 +211,56 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn malformed_config_refuses_rollback() {
-        assert!(matches!(
-            reject_attach_only(1, "config", "not json"),
-            Err(DbErr::Migration(message)) if message.contains("invalid JSON")
-        ));
+    #[tokio::test]
+    async fn ambiguous_or_malformed_shapes_keep_marker() -> Result<(), Box<dyn std::error::Error>> {
+        for config in [
+            "not json",
+            "null",
+            "[]",
+            r#"{"spec":null}"#,
+            r#"{"spec":[]}"#,
+            r#"{"mounts":null}"#,
+            r#"{"mounts":{}}"#,
+            r#"{"mounts":[null]}"#,
+            r#"{"mounts":[[]]}"#,
+            r#"{"mounts":[{"attach_only":null}]}"#,
+            r#"{"mounts":[{"attach_only":"false"}]}"#,
+            r#"{"mounts":[{"attach_only":0}]}"#,
+            r#"{"spec":{"mounts":null}}"#,
+            r#"{"spec":{"mounts":{}}}"#,
+            r#"{"spec":{"mounts":[null]}}"#,
+            r#"{"spec":{"mounts":[[]]}}"#,
+            r#"{"spec":{"mounts":[{"attach_only":null}]}}"#,
+            r#"{"spec":{"mounts":[{"attach_only":"false"}]}}"#,
+            r#"{"spec":{"mounts":[{"attach_only":0}]}}"#,
+            r#"{"mounts":[],"spec":{"mounts":[{"attach_only":true}]}}"#,
+            r#"{"mounts":[{"attach_only":true}],"spec":{"mounts":[]}}"#,
+        ] {
+            for column in ["config", "active_config"] {
+                let (desired, active) = if column == "config" {
+                    (config, "{}")
+                } else {
+                    ("{}", config)
+                };
+                let db = fixture(desired, Some(active)).await?;
+                let result = MarkerMigrator::down(&db, Some(1)).await;
+                assert!(
+                    matches!(result, Err(DbErr::Migration(ref message))
+                    if message.contains("attach_only_downgrade_unrepresentable") && message.contains(column)),
+                    "rollback accepted {column}: {config}"
+                );
+                assert_eq!(MarkerMigrator::get_applied_migrations(&db).await?.len(), 1);
+                let row = db
+                    .query_one_raw(Statement::from_string(
+                        DatabaseBackend::Sqlite,
+                        "SELECT config, active_config FROM sandbox WHERE id = 1".to_owned(),
+                    ))
+                    .await?
+                    .ok_or("sandbox disappeared during refused marker rollback")?;
+                assert_eq!(row.try_get_by_index::<String>(0)?, desired);
+                assert_eq!(row.try_get_by_index::<String>(1)?, active);
+            }
+        }
+        Ok(())
     }
 }
