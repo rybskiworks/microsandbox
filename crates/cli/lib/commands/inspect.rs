@@ -303,12 +303,14 @@ pub async fn run(args: InspectArgs) -> anyhow::Result<()> {
                         guest,
                         format,
                         fstype,
+                        attach_only,
                         options,
                     } => {
                         let flags = mount_flags_suffix(*options);
                         let fstype = fstype.as_deref().unwrap_or("auto");
+                        let attach_only = if attach_only { " attach-only" } else { "" };
                         println!(
-                            "  {guest:<16}\u{2192} disk:{} ({}) [{fstype}]{flags}",
+                            "  {guest:<16}\u{2192} disk:{} ({}) [{fstype}]{flags}{attach_only}",
                             host.display(),
                             format.as_str()
                         );

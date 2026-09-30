@@ -434,6 +434,10 @@ fn to_built_mount(mount: RustVolumeMount) -> JsBuiltVolumeMount {
             format,
             fstype,
             options,
+            // The node-ts binding does not surface attach-only yet; the
+            // host-local launch flag is available through the CLI and the
+            // core Rust SDK.
+            attach_only: _,
         } => JsBuiltVolumeMount {
             kind: "disk".into(),
             guest,

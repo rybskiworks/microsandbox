@@ -2793,15 +2793,23 @@ fn sandbox_cli_args(
                 format,
                 fstype,
                 options,
+                attach_only,
             } => {
                 let id = guest_mount_tag(guest);
+                // The device always attaches as virtio-blk. Attach-only disks
+                // are deliberately excluded from the agentd bootstrap mount
+                // list: the guest kernel never tries to mount them (LUKS
+                // containers cannot be mounted by mount(2)) and boot cannot
+                // abort on them.
                 push_disk_mount_arg(&mut launch.disks, &id, &host.display(), format, *options);
-                launch.bootstrap.disk_mounts.push(BootstrapDiskMount {
-                    id,
-                    guest_path: guest.clone(),
-                    fstype: fstype.clone(),
-                    flags: bootstrap_mount_flags(*options),
-                });
+                if !attach_only {
+                    launch.bootstrap.disk_mounts.push(BootstrapDiskMount {
+                        id,
+                        guest_path: guest.clone(),
+                        fstype: fstype.clone(),
+                        flags: bootstrap_mount_flags(*options),
+                    });
+                }
             }
         }
     }
@@ -4914,6 +4922,41 @@ mod tests {
         assert!(rendered.contains(&format!("MSB_DISK_MOUNTS={tag}:/seed:ro,noexec")));
     }
 
+    #[tokio::test]
+    async fn test_sandbox_cli_args_disk_image_attach_only_excludes_bootstrap_mount() -> Result<
+        (),
+        Box<dyn std::error::Error>,
+    > {
+        let dir = tempfile::tempdir()?;
+        let host = dir.path().join("ssd3.raw");
+        std::fs::write(&host, []).map_err(Box::<dyn std::error::Error>::from)?;
+
+        let host_clone = host.clone();
+        let config = SandboxBuilder::new("test")
+            .image("/tmp/rootfs")
+            .volume("/ssd3", |m| m.disk(host_clone).attach_only().readonly())
+            .build()
+            .await?;
+
+        let rendered = render_args(&config);
+        let tag = super::guest_mount_tag("/ssd3");
+        let expected_disk_arg = format!("{tag}:{}:raw:ro", host.display());
+        assert!(
+            rendered
+                .windows(2)
+                .any(|pair| pair[0] == "--disk" && pair[1] == expected_disk_arg),
+            "attach-only disk missing from --disk args: {rendered:?}"
+        );
+
+        // The device must NOT appear in the agentd bootstrap mount list: the
+        // guest kernel never tries to mount it and boot cannot abort on it.
+        assert!(
+            !rendered.iter().any(|arg| arg.starts_with("MSB_DISK_MOUNTS=")),
+            "attach-only disk leaked into MSB_DISK_MOUNTS: {rendered:?}"
+        );
+        Ok(())
+    }
+
     #[test]
     fn test_lock_disk_mounts_rejects_rootfs_and_mount_same_path() {
         let dir = tempfile::tempdir().unwrap();
@@ -4932,6 +4975,7 @@ mod tests {
                     guest: "/data".to_string(),
                     format: DiskImageFormat::Raw,
                     fstype: None,
+                    attach_only: false,
                     options: MountOptions::default(),
                 }],
                 ..Default::default()

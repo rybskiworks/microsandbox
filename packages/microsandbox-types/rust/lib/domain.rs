@@ -449,6 +449,18 @@ pub enum VolumeMount {
         fstype: Option<String>,
         /// Guest mount behavior.
         options: MountOptions,
+        /// Attach the device without mounting it inside the guest.
+        ///
+        /// When set, the disk is attached as a virtio-blk device but omitted
+        /// from the agentd bootstrap mount list, so the guest kernel never
+        /// tries to mount it and boot cannot abort on an unmountable
+        /// container (for example a `crypto_LUKS` partition). The guest finds
+        /// the device deterministically at `/dev/disk/by-id/virtio-<id>` (the
+        /// `id` is derived from the guest path) or as the next free
+        /// `/dev/vdX`. Defaults to `false`: the disk is mounted at
+        /// `guest` after boot as before.
+        #[serde(default, skip_serializing_if = "is_false")]
+        attach_only: bool,
     },
 }
 

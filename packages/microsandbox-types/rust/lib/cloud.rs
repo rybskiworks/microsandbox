@@ -663,6 +663,9 @@ impl From<CloudVolumeMount> for VolumeMount {
                 guest,
                 format: format.into(),
                 fstype,
+                // The cloud wire format does not carry the attach-only flag
+                // yet; rehydrated mounts keep the default mounted behavior.
+                attach_only: false,
                 options,
             },
         }
@@ -722,6 +725,10 @@ impl From<VolumeMount> for CloudVolumeMount {
                 format,
                 fstype,
                 options,
+                // Attach-only is a host-local launch property: the device is
+                // attached but never mounted by agentd, which the cloud wire
+                // format does not express. Dropped here deliberately.
+                attach_only: _,
             } => CloudVolumeMount::DiskImage {
                 host,
                 guest,

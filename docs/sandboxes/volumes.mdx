@@ -285,6 +285,8 @@ msb volume rm old-cache
 
 Disk-image volumes attach a host disk image as a virtio-blk device and mount its inner filesystem at a guest path. Use them when you want persistent state isolated from ordinary host filesystem metadata, or when distributing a prebuilt filesystem image. The disk format defaults from the file extension (`.qcow2`, `.raw`, `.vmdk`; otherwise raw). microsandbox auto-detects the inner filesystem type unless you set `fstype`.
 
+**Attach-only (no mount).** Pass `attach-only` (CLI) or `.attach_only()` (Rust SDK) to attach the device without mounting it. The device still appears as virtio-blk, but it is excluded from the agentd bootstrap mount list, so agentd never tries to mount it and cannot abort the boot on an unmountable container. Use this for raw containers such as a `crypto_LUKS` partition — the guest opens and mounts it itself. The guest finds the device deterministically at `/dev/disk/by-id/virtio-<id>` (the `id` is derived from the guest path) or as the next free `/dev/vdX`.
+
 <CodeGroup>
 ```typescript TypeScript
 await using sb = await Sandbox.builder("seeded")
@@ -400,7 +402,7 @@ CLI mount flags use `SOURCE:DEST[:OPTIONS]`. The `:` before `OPTIONS` starts the
 | `--mount-dir` | Host directory | `ro`, `rw`, `noexec`, `nosuid`, `nodev`, `stat-virt=strict\|relaxed\|off`, `host-perms=private\|mirror`, `quota=<size>`, `policy=<path>`, paired `uid=<N>,gid=<N>` |
 | `--mount-file` | Host file | `ro`, `rw`, `noexec`, `nosuid`, `nodev`, `stat-virt=strict\|relaxed\|off`, `host-perms=private\|mirror`, `quota=<size>`, `policy=<path>`, paired `uid=<N>,gid=<N>` |
 | `--mount-named` | Named volume | `ro`, `rw`, `noexec`, `nosuid`, `nodev`, `kind=dir\|disk`, `size=<size>` for `kind=disk`, `quota=<size>` for directory volumes; directory-backed named volumes also support `stat-virt=strict\|relaxed\|off`, `host-perms=private\|mirror`, paired `uid=<N>,gid=<N>` |
-| `--mount-disk` | Host disk image | `ro`, `rw`, `noexec`, `nosuid`, `nodev`, `format=raw\|qcow2\|vmdk`, `fstype=<type>` |
+| `--mount-disk` | Host disk image | `ro`, `rw`, `noexec`, `nosuid`, `nodev`, `attach-only`, `format=raw\|qcow2\|vmdk`, `fstype=<type>` |
 | `--tmpfs` | Guest path | `ro`, `rw`, `noexec`, `nosuid`, `nodev`; size may be passed as `PATH:SIZE[:OPTIONS]` |
 
 ## Combining mounts
